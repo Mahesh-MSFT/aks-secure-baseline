@@ -52,3 +52,11 @@ RESOURCEID_VNET_HUB=$(az deployment group show -g rg-enterprise-networking-hubs 
 # Deploy the Spoke VNet
 az deployment group create -g rg-enterprise-networking-spokes -f ./networking/spoke-BU0001A0008.json -p location=uksouth hubVnetResourceId="${RESOURCEID_VNET_HUB}"
 
+# Create the AKS cluster resource group.
+az group create --name aks-rg --location uksouth
+
+# Get the AKS cluster spoke VNet resource ID
+RESOURCEID_VNET_CLUSTERSPOKE=$(az deployment group show -g rg-enterprise-networking-spokes -n spoke-BU0001A0008 --query properties.outputs.clusterVnetResourceId.value -o tsv)
+
+# Deploy the cluster ARM template
+az deployment group create -g aks-rg -f ./cluster-stamp.json -p targetVnetResourceId=${RESOURCEID_VNET_CLUSTERSPOKE} clusterAdminAadGroupObjectId=${AADOBJECTID_GROUP_CLUSTERADMIN} k8sControlPlaneAuthorizationTenantId=${TENANTID_K8SRBAC} appGatewayListenerCertificate=${APP_GATEWAY_LISTENER_CERTIFICATE} aksIngressControllerCertificate=${AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64}
