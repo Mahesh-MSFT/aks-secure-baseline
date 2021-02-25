@@ -56,7 +56,7 @@ RESOURCEID_VNET_HUB=$(az deployment group show -g rg-enterprise-networking-hubs 
 az deployment group create -g rg-enterprise-networking-spokes -f ./networking/spoke-BU0001A0008.json -p location=uksouth hubVnetResourceId="${RESOURCEID_VNET_HUB}"
 
 # Create the AKS cluster resource group.
-az group create --name aks-rg --location uksouth
+az group create --name maksh-pnp-aks-rg --location uksouth
 
 # Get the AKS cluster spoke VNet resource ID
 RESOURCEID_VNET_CLUSTERSPOKE=$(az deployment group show -g rg-enterprise-networking-spokes -n spoke-BU0001A0008 --query properties.outputs.clusterVnetResourceId.value -o tsv)
@@ -69,7 +69,7 @@ az deployment group create -g aks-rg -f ./cluster-stamp.json -p targetVnetResour
     aksIngressControllerCertificate=${AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64}
 
 # Deploy the cluster ARM template (Template File)
-az deployment group create -g aks-rg -f ./cluster-stamp.json -p "@azuredeploy.parameters.prod.json"
+az deployment group create -g maksh-pnp-aks-rg -f ./cluster-stamp.json -p "@azuredeploy.parameters.prod.json"
 
 # DEBUGGING ONLY: Delete a specific ARM template Deployment
-az deployment group delete --resource-group aks-rg --name PolicyDeployment_10384143052167400171
+az deployment group delete --resource-group aks-rg --name cluster-stamp
