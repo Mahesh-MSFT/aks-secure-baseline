@@ -23,6 +23,9 @@ TENANTID_K8SRBAC=$(az account show --query tenantId -o tsv)
 export AADOBJECTNAME_GROUP_CLUSTERADMIN=aks-cluster-admins
 export AADOBJECTID_GROUP_CLUSTERADMIN=$(az ad group create --display-name $AADOBJECTNAME_GROUP_CLUSTERADMIN --mail-nickname $AADOBJECTNAME_GROUP_CLUSTERADMIN --description "Principals in this group are AKS cluster admins." --query objectId -o tsv)
 
+# TOBE USed for Subsequent Executions
+export AADOBJECTID_GROUP_CLUSTERADMIN=$(az ad group show -g $AADOBJECTNAME_GROUP_CLUSTERADMIN --query objectId -o tsv)
+
 # Create a "Break Glass" User Account to be added in Azure AD Group
 export TENANTDOMAIN_K8SRBAC=$(az ad signed-in-user show --query 'userPrincipalName' -o tsv | cut -d '@' -f 2 | sed 's/\"//')
 export AADOBJECTNAME_USER_CLUSTERADMIN=aks-cluster-admin-breakglass-user
@@ -58,5 +61,15 @@ az group create --name aks-rg --location uksouth
 # Get the AKS cluster spoke VNet resource ID
 RESOURCEID_VNET_CLUSTERSPOKE=$(az deployment group show -g rg-enterprise-networking-spokes -n spoke-BU0001A0008 --query properties.outputs.clusterVnetResourceId.value -o tsv)
 
-# Deploy the cluster ARM template
-az deployment group create -g aks-rg -f ./cluster-stamp.json -p targetVnetResourceId=${RESOURCEID_VNET_CLUSTERSPOKE} clusterAdminAadGroupObjectId=${AADOBJECTID_GROUP_CLUSTERADMIN} k8sControlPlaneAuthorizationTenantId=${TENANTID_K8SRBAC} appGatewayListenerCertificate=${APP_GATEWAY_LISTENER_CERTIFICATE} aksIngressControllerCertificate=${AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64}
+# Deploy the cluster ARM template (Individual Parameters)
+az deployment group create -g aks-rg -f ./cluster-stamp.json -p targetVnetResourceId=${RESOURCEID_VNET_CLUSTERSPOKE} \
+    location=uksouth \
+    clusterAdminAadGroupObjectId=${AADOBJECTID_GROUP_CLUSTERADMIN} k8sControlPlaneAuthorizationTenantId=${TENANTID_K8SRBAC} \
+    appGatewayListenerCertificate=${APP_GATEWAY_LISTENER_CERTIFICATE} \
+    aksIngressControllerCertificate=${AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64}
+
+# Deploy the cluster ARM template (Template File)
+az deployment group create -g aks-rg -f ./cluster-stamp.json -p "@azuredeploy.parameters.prod.json"
+
+# DEBUGGING ONLY: Delete a specific ARM template Deployment
+az deployment group delete --resource-group aks-rg --name PolicyDeployment_10384143052167400171
