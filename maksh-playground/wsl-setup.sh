@@ -11,7 +11,8 @@ export AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64=$(cat traefik-ingress-internal-
 
 # Login to Azure and set right Azure subscription (USE CREDS THAT HAVE RIGHTS TO CREATE AZURE AD GROUP)
 az login
-az account set -s "FTE - Visual Studio Enterprise Subscription"
+#az account set -s "FTE - Visual Studio Enterprise Subscription"
+az account set -s "Maksh's Azure"
 
 # Query and save Azure subscription's tenant id.
 TENANTID_AZURERBAC=$(az account show --query tenantId -o tsv)
@@ -20,8 +21,9 @@ TENANTID_AZURERBAC=$(az account show --query tenantId -o tsv)
 TENANTID_K8SRBAC=$(az account show --query tenantId -o tsv)
 
 # Create the Azure AD security group to be mapped to the Kubernetes Cluster Admin role cluster-admin
-export AADOBJECTNAME_GROUP_CLUSTERADMIN=aks-cluster-admins
-export AADOBJECTID_GROUP_CLUSTERADMIN=$(az ad group create --display-name $AADOBJECTNAME_GROUP_CLUSTERADMIN --mail-nickname $AADOBJECTNAME_GROUP_CLUSTERADMIN --description "Principals in this group are AKS cluster admins." --query objectId -o tsv)
+export AADOBJECTNAME_GROUP_CLUSTERADMIN=maksh-aks-cluster-admins
+#export AADOBJECTID_GROUP_CLUSTERADMIN=$(az ad group create --display-name $AADOBJECTNAME_GROUP_CLUSTERADMIN --mail-nickname $AADOBJECTNAME_GROUP_CLUSTERADMIN --description "Principals in this group are AKS cluster admins." --query objectId -o tsv)
+export AADOBJECTID_GROUP_CLUSTERADMIN=d6ffaa4e-d30c-4041-8499-4c8ae2c8c9a2
 
 # TOBE USed for Subsequent Executions
 export AADOBJECTID_GROUP_CLUSTERADMIN=$(az ad group show -g $AADOBJECTNAME_GROUP_CLUSTERADMIN --query objectId -o tsv)
@@ -32,13 +34,14 @@ export AADOBJECTNAME_USER_CLUSTERADMIN=aks-cluster-admin-breakglass-user
 export AADOBJECTID_USER_CLUSTERADMIN=$(az ad user create --display-name=${AADOBJECTNAME_USER_CLUSTERADMIN} --user-principal-name ${AADOBJECTNAME_USER_CLUSTERADMIN}@${TENANTDOMAIN_K8SRBAC} --force-change-password-next-login --password ChangeMebu0001a0008AdminChangeMe --query objectId -o tsv)
 
 # Add the cluster admin user(s) to the cluster admin security group. This UserID will create AKS cluster
-az ad group member add -g $AADOBJECTID_GROUP_CLUSTERADMIN --member-id $AADOBJECTID_USER_CLUSTERADMIN
+# az ad group member add -g $AADOBJECTID_GROUP_CLUSTERADMIN --member-id $AADOBJECTID_USER_CLUSTERADMIN
+az ad group member add -g $AADOBJECTID_GROUP_CLUSTERADMIN --member-id aa610942-4935-4bc0-81ee-99cfa96ce7a1
 
 # Navigate to cluster-rbac.yaml and identify palceholder to update AAD group ID
 
 # Start Deploying Hub and Spoke Network Topology
 az login -t $TENANTID_AZURERBAC
-az account set -s "FTE - Visual Studio Enterprise Subscription"
+az account set -s "Maksh's Azure"
 
 # Create RG for Hub
 az group create -n rg-enterprise-networking-hubs -l uksouth
@@ -55,8 +58,13 @@ RESOURCEID_VNET_HUB=$(az deployment group show -g rg-enterprise-networking-hubs 
 # Deploy the Spoke VNet
 az deployment group create -g rg-enterprise-networking-spokes -f ./networking/spoke-BU0001A0008.json -p location=uksouth hubVnetResourceId="${RESOURCEID_VNET_HUB}"
 
+# Update the shared, regional hub deployment 
+RESOURCEID_SUBNET_NODEPOOLS=$(az deployment group show -g rg-enterprise-networking-spokes -n spoke-BU0001A0008 --query properties.outputs.nodepoolSubnetResourceIds.value -o tsv)
+az deployment group create -g rg-enterprise-networking-hubs -f networking/hub-regionA.json -p location=uksouth nodepoolSubnetResourceIds="['${RESOURCEID_SUBNET_NODEPOOLS}']"
+
 # Create the AKS cluster resource group.
-az group create --name maksh-pnp-aks-rg --location uksouth
+az group create --name maksh-bc2-aks-rg --location uksouth
+az group create --name maksh-bc3-aks-rg --location uksouth
 
 # Get the AKS cluster spoke VNet resource ID
 RESOURCEID_VNET_CLUSTERSPOKE=$(az deployment group show -g rg-enterprise-networking-spokes -n spoke-BU0001A0008 --query properties.outputs.clusterVnetResourceId.value -o tsv)
@@ -69,7 +77,33 @@ az deployment group create -g aks-rg -f ./cluster-stamp.json -p targetVnetResour
     aksIngressControllerCertificate=${AKS_INGRESS_CONTROLLER_CERTIFICATE_BASE64}
 
 # Deploy the cluster ARM template (Template File)
-az deployment group create -g maksh-pnp-aks-rg -f ./cluster-stamp.json -p "@azuredeploy.parameters.prod.json"
+az deployment group create -g maksh-bc3-aks-rg -f ./cluster-stamp.json -p "@azuredeploy.parameters.prod-maksh.json"
 
 # DEBUGGING ONLY: Delete a specific ARM template Deployment
 az deployment group delete --resource-group aks-rg --name cluster-stamp
+
+# Get the cluster name
+AKS_CLUSTER_NAME=$(az deployment group show -g maksh-bc2-aks-rg -n cluster-stamp --query properties.outputs.aksClusterName.value -o tsv)
+
+# Get AKS kubectl credentials.
+az aks get-credentials -g maksh-bc2-aks-rg -n $AKS_CLUSTER_NAME
+
+# Validate
+kubectl get nodes
+
+# Get your ACR cluster name
+ACR_NAME=$(az deployment group show -g  maksh-bc2-aks-rg -n cluster-stamp --query properties.outputs.containerRegistryName.value -o tsv)
+
+# Import cluster management images hosted in public container registries
+az acr import --source docker.io/library/memcached:1.5.20 -n $ACR_NAME
+az acr import --source docker.io/fluxcd/flux:1.21.1 -n $ACR_NAME
+az acr import --source docker.io/weaveworks/kured:1.6.1 -n $ACR_NAME
+
+# Create the cluster baseline settings namespace as a logical division of the cluster bootstrap configuration from workload configuration
+kubectl create namespace cluster-baseline-settings
+
+# Deploy Flux
+kubectl create -f https://raw.githubusercontent.com/mspnp/aks-secure-baseline/main/cluster-manifests/cluster-baseline-settings/flux.yaml
+
+# Wait for Flux to be ready
+kubectl wait -n cluster-baseline-settings --for=condition=ready pod --selector=app.kubernetes.io/name=flux --timeout=90s
